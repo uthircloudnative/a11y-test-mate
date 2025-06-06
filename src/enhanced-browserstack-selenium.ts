@@ -905,7 +905,7 @@ export class EnhancedBrowserStackA11yTester {
   }
 
   /**
-   * Discover internal links on current page
+   * Discover internal links on current page with enhanced filtering and prioritization
    */
   async getInternalLinks(baseUrl: string): Promise<string[]> {
     if (!this.driver) {
@@ -917,16 +917,29 @@ export class EnhancedBrowserStackA11yTester {
       
       // Get all links on the page
       const linkElements = await this.driver.findElements(By.css('a[href]'));
-      const links: string[] = [];
+      const discoveredLinks: { url: string; text: string; priority: number }[] = [];
 
-      for (const element of linkElements) {
+      for (const linkElement of linkElements) {
         try {
-          const href = await element.getAttribute('href');
+          const href = await linkElement.getAttribute('href');
+          const linkText = await linkElement.getText();
+          
           if (href) {
             const url = new URL(href, baseUrl);
-            // Only include links from the same origin
-            if (url.origin === base.origin) {
-              links.push(url.href);
+            
+            // Only include internal links from the same domain
+            if (url.hostname === base.hostname) {
+              const normalizedUrl = url.protocol + '//' + url.hostname + url.pathname;
+              
+              // Enhanced filtering: exclude non-page URLs and common patterns
+              if (this.isValidCrawlableUrl(normalizedUrl, linkText)) {
+                const priority = this.calculateUrlPriority(normalizedUrl, linkText);
+                discoveredLinks.push({
+                  url: normalizedUrl,
+                  text: linkText,
+                  priority
+                });
+              }
             }
           }
         } catch (e) {
@@ -934,16 +947,225 @@ export class EnhancedBrowserStackA11yTester {
         }
       }
 
-      // Remove duplicates
-      const uniqueLinks = Array.from(new Set(links));
-      console.log(`🔍 Discovered ${uniqueLinks.length} internal links`);
-      
-      return uniqueLinks;
+      // Remove duplicates and sort by priority
+      const uniqueLinks = new Map<string, { text: string; priority: number }>();
+      for (const link of discoveredLinks) {
+        if (!uniqueLinks.has(link.url) || uniqueLinks.get(link.url)!.priority < link.priority) {
+          uniqueLinks.set(link.url, { text: link.text, priority: link.priority });
+        }
+      }
+
+      // Sort by priority (higher priority first) and return URLs
+      const sortedLinks = Array.from(uniqueLinks.entries())
+        .sort((a, b) => b[1].priority - a[1].priority)
+        .map(([url]) => url);
+
+      console.log(`🔍 Discovered ${sortedLinks.length} prioritized internal links`);
+      return sortedLinks;
 
     } catch (error) {
       console.error('❌ Failed to discover links:', error);
       return [];
     }
+  }
+
+  /**
+   * Enhanced URL validation for crawling
+   */
+  private isValidCrawlableUrl(url: string, linkText: string): boolean {
+    // Exclude fragment identifiers, non-HTTP protocols, and file extensions
+    if (url.includes('#') || 
+        url.includes('mailto:') || 
+        url.includes('tel:') ||
+        url.includes('javascript:') ||
+        url.match(/\.(pdf|jpg|jpeg|png|gif|css|js|ico|xml|json|txt|zip|doc|docx|xls|xlsx|ppt|pptx)$/i)) {
+      return false;
+    }
+
+    // Exclude admin, API, and utility pages
+    const excludePatterns = [
+      /\/admin/i,
+      /\/api\//i,
+      /\/wp-admin/i,
+      /\/wp-content/i,
+      /\/wp-includes/i,
+      /\/wp-json/i,
+      /\/feed\//i,
+      /\/rss/i,
+      /\/sitemap/i,
+      /\/robots\.txt/i,
+      /\/favicon\.ico/i,
+      /\/apple-touch-icon/i,
+      /\/manifest\.json/i,
+      /\/service-worker/i,
+      /\/sw\.js/i,
+      /\/logout/i,
+      /\/signout/i,
+      /\/sign-out/i,
+      /\/unsubscribe/i,
+      /\/delete/i,
+      /\/remove/i,
+      /\/download/i,
+      /\/print/i,
+      /\/share/i,
+      /\/embed/i
+    ];
+
+    for (const pattern of excludePatterns) {
+      if (pattern.test(url)) {
+        return false;
+      }
+    }
+
+    // Exclude very long URLs (likely dynamic/generated)
+    if (url.length > 200) {
+      return false;
+    }
+
+    // Exclude URLs with too many query parameters
+    const urlObj = new URL(url);
+    if (urlObj.searchParams.toString().length > 100) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Calculate priority score for URLs based on content importance
+   */
+  private calculateUrlPriority(url: string, linkText: string): number {
+    let priority = 1; // Base priority
+
+    // Higher priority for main content pages
+    const highPriorityPatterns = [
+      /\/about/i,
+      /\/services/i,
+      /\/products/i,
+      /\/solutions/i,
+      /\/features/i,
+      /\/pricing/i,
+      /\/contact/i,
+      /\/support/i,
+      /\/help/i,
+      /\/faq/i,
+      /\/documentation/i,
+      /\/docs/i,
+      /\/guide/i,
+      /\/tutorial/i,
+      /\/learn/i,
+      /\/blog/i,
+      /\/news/i,
+      /\/resources/i,
+      /\/case-studies/i,
+      /\/testimonials/i,
+      /\/customers/i,
+      /\/partners/i,
+      /\/team/i,
+      /\/careers/i,
+      /\/jobs/i
+    ];
+
+    for (const pattern of highPriorityPatterns) {
+      if (pattern.test(url)) {
+        priority += 3;
+        break;
+      }
+    }
+
+    // Medium priority for navigation and category pages
+    const mediumPriorityPatterns = [
+      /\/category/i,
+      /\/categories/i,
+      /\/section/i,
+      /\/departments/i,
+      /\/browse/i,
+      /\/search/i,
+      /\/filter/i,
+      /\/tag/i,
+      /\/tags/i
+    ];
+
+    for (const pattern of mediumPriorityPatterns) {
+      if (pattern.test(url)) {
+        priority += 2;
+        break;
+      }
+    }
+
+    // Priority based on link text content
+    const highValueLinkText = [
+      /about/i,
+      /service/i,
+      /product/i,
+      /solution/i,
+      /feature/i,
+      /pricing/i,
+      /contact/i,
+      /support/i,
+      /help/i,
+      /documentation/i,
+      /guide/i,
+      /tutorial/i,
+      /learn/i,
+      /getting started/i,
+      /how to/i,
+      /overview/i,
+      /introduction/i
+    ];
+
+    for (const pattern of highValueLinkText) {
+      if (pattern.test(linkText)) {
+        priority += 2;
+        break;
+      }
+    }
+
+    // Lower priority for user-generated content and dynamic pages
+    const lowerPriorityPatterns = [
+      /\/user/i,
+      /\/profile/i,
+      /\/account/i,
+      /\/settings/i,
+      /\/preferences/i,
+      /\/dashboard/i,
+      /\/edit/i,
+      /\/create/i,
+      /\/add/i,
+      /\/new/i,
+      /\/upload/i,
+      /\/comment/i,
+      /\/reply/i,
+      /\/vote/i,
+      /\/like/i,
+      /\/share/i,
+      /\/follow/i,
+      /\/subscribe/i
+    ];
+
+    for (const pattern of lowerPriorityPatterns) {
+      if (pattern.test(url)) {
+        priority -= 1;
+        break;
+      }
+    }
+
+    // Prefer shorter, cleaner URLs
+    const pathDepth = (url.match(/\//g) || []).length - 2; // Subtract protocol slashes
+    if (pathDepth <= 2) {
+      priority += 1;
+    } else if (pathDepth > 4) {
+      priority -= 1;
+    }
+
+    // Avoid URLs with too many parameters
+    const urlObj = new URL(url);
+    const paramCount = Array.from(urlObj.searchParams.keys()).length;
+    if (paramCount > 3) {
+      priority -= 2;
+    }
+
+    return Math.max(priority, 0); // Ensure non-negative priority
   }
 
   /**
@@ -1006,7 +1228,7 @@ export class EnhancedBrowserStackA11yTester {
   }
 
   /**
-   * Crawl and test multiple pages with login
+   * Enhanced crawl and test multiple pages with intelligent navigation
    */
   async crawlAndTest(startUrl: string, maxPages: number = 10): Promise<A11yTestResult[]> {
     if (!this.driver) {
@@ -1015,10 +1237,13 @@ export class EnhancedBrowserStackA11yTester {
 
     const results: A11yTestResult[] = [];
     const visited = new Set<string>();
-    const queue: string[] = [];
+    const queue: { url: string; depth: number; priority: number }[] = [];
+    const maxDepth = 3; // Limit crawling depth to avoid going too deep
+    const maxLinksPerPage = Math.min(50, maxPages * 3); // Dynamic link discovery limit
 
-    console.log(`🚀 Starting crawl and test from: ${startUrl}`);
+    console.log(`🚀 Starting enhanced crawl and test from: ${startUrl}`);
     console.log(`📋 Max pages to test: ${maxPages}`);
+    console.log(`📊 Max crawling depth: ${maxDepth}`);
 
     let crawlStartUrl = startUrl;
 
@@ -1028,6 +1253,8 @@ export class EnhancedBrowserStackA11yTester {
       if (!loginResult.success) {
         throw new Error('Login failed - cannot proceed with crawling');
       } else {
+        console.log('✅ Login successful, proceeding with crawling');
+        
         // Determine the URL to start crawling from
         if (this.config.loginConfig.postLoginUrl && this.config.loginConfig.postLoginUrl !== 'https://example.com/dashboard') {
           crawlStartUrl = this.config.loginConfig.postLoginUrl;
@@ -1041,42 +1268,83 @@ export class EnhancedBrowserStackA11yTester {
 
     // Navigate to the starting URL for crawling
     await this.driver.get(crawlStartUrl);
+    await this.waitForDynamicContent(); // Enhanced page load waiting
 
     // Test the starting page
+    console.log(`\n🌐 Testing starting page: ${crawlStartUrl}`);
     const firstResult = await this.testCurrentPage();
     results.push(firstResult);
     visited.add(firstResult.url);
 
-    // Discover links for crawling
-    const links = await this.getInternalLinks(crawlStartUrl);
-    queue.push(...links.filter(link => !visited.has(link)));
+    // Discover initial links for crawling with priority scoring
+    console.log(`🔍 Discovering links from starting page...`);
+    const initialLinks = await this.getInternalLinks(crawlStartUrl);
+    
+    // Add discovered links to queue with depth 1 and their calculated priorities
+    for (const link of initialLinks) {
+      if (!visited.has(link)) {
+        queue.push({ url: link, depth: 1, priority: this.calculateUrlPriority(link, '') });
+      }
+    }
 
-    // Crawl additional pages
+    // Sort initial queue by priority
+    queue.sort((a, b) => b.priority - a.priority);
+    console.log(`📝 Added ${queue.length} prioritized links to crawling queue`);
+
+    // Enhanced crawling with depth control and intelligent navigation
     while (queue.length > 0 && results.length < maxPages) {
-      const nextUrl = queue.shift()!;
+      // Get the highest priority URL from the queue
+      const current = queue.shift()!;
       
-      if (visited.has(nextUrl)) continue;
-      visited.add(nextUrl);
+      if (visited.has(current.url) || current.depth > maxDepth) {
+        continue;
+      }
+      
+      visited.add(current.url);
 
       try {
-        console.log(`\n🌐 Navigating to: ${nextUrl}`);
-        await this.driver.get(nextUrl);
-        await this.driver.sleep(2000); // Wait for page load
+        console.log(`\n🌐 [Depth ${current.depth}] Navigating to: ${current.url}`);
+        await this.driver.get(current.url);
+        await this.waitForDynamicContent();
 
         // Test the page
         const result = await this.testCurrentPage();
         results.push(result);
 
-        // Discover more links if we haven't reached the limit
-        if (results.length < maxPages) {
-          const newLinks = await this.getInternalLinks(crawlStartUrl);
-          queue.push(...newLinks.filter(link => !visited.has(link)));
+        console.log(`✅ Page tested successfully (${results.length}/${maxPages})`);
+
+        // Discover more links if we haven't reached the limit and depth allows
+        if (results.length < maxPages && current.depth < maxDepth) {
+          console.log(`🔍 Discovering new links from current page...`);
+          const newLinks = await this.getInternalLinks(current.url);
+          let addedCount = 0;
+
+          for (const link of newLinks) {
+            if (!visited.has(link) && !queue.some(q => q.url === link)) {
+              const priority = this.calculateUrlPriority(link, '');
+              queue.push({ 
+                url: link, 
+                depth: current.depth + 1, 
+                priority: priority + (maxDepth - current.depth) // Boost priority for shallower pages
+              });
+              addedCount++;
+              
+              // Limit the number of links we add per page to prevent queue explosion
+              if (addedCount >= Math.min(10, maxPages - results.length)) {
+                break;
+              }
+            }
+          }
+
+          // Re-sort queue by priority after adding new links
+          queue.sort((a, b) => b.priority - a.priority);
+          console.log(`📝 Added ${addedCount} new links to queue (Total queue: ${queue.length})`);
         }
 
       } catch (error) {
-        console.error(`❌ Failed to test ${nextUrl}:`, error);
+        console.error(`❌ Failed to test ${current.url}:`, error);
         results.push({
-          url: nextUrl,
+          url: current.url,
           violations: [],
           passes: [],
           incomplete: [],
@@ -1088,7 +1356,12 @@ export class EnhancedBrowserStackA11yTester {
       }
     }
 
-    console.log(`\n📊 Crawling completed: ${results.length} pages tested`);
+    console.log(`\n📊 Enhanced crawling completed:`);
+    console.log(`   • Pages tested: ${results.length}`);
+    console.log(`   • Pages discovered but not tested: ${queue.length}`);
+    console.log(`   • Maximum depth reached: ${Math.max(...results.map((_, i) => 
+      queue.find(q => q.url === results[i]?.url)?.depth || 0))}`);
+    
     return results;
   }
 

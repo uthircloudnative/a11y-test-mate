@@ -1,12 +1,58 @@
+/**
+ * ===================================================================
+ * MAIN.TS - PRIMARY ACCESSIBILITY TESTING ENTRY POINT
+ * ===================================================================
+ * 
+ * PURPOSE:
+ * This is the main command-line interface for the a11y-test-mate framework.
+ * It can run accessibility tests either locally on your computer or in the cloud
+ * using BrowserStack. Think of it as the "control center" that coordinates everything.
+ * 
+ * WHAT THIS FILE DOES:
+ * 1. 📝 Reads command-line arguments (like --url, --browser, --username)
+ * 2. 🔐 Loads BrowserStack credentials from environment variables
+ * 3. 🌐 Connects to either local browser or BrowserStack cloud
+ * 4. 🔑 Automatically logs into websites using provided credentials
+ * 5. ♿ Scans web pages for accessibility issues using axe-core
+ * 6. 📊 Generates detailed reports of any problems found
+ * 
+ * EXAMPLE USAGE:
+ * ```bash
+ * # Test locally
+ * npm run run-a11y-local -- --url https://example.com
+ * 
+ * # Test on BrowserStack
+ * npm run run-a11y-browserstack -- --url https://example.com --username test@email.com --password mypass
+ * ```
+ * 
+ * KEY FEATURES:
+ * ✅ Works with both local browsers and BrowserStack cloud
+ * ✅ Handles login-protected websites automatically
+ * ✅ Supports multiple browsers (Chrome, Firefox, Safari, Edge)
+ * ✅ Generates comprehensive accessibility reports
+ * ✅ Compatible with free BrowserStack plans
+ * 
+ * NON-TYPESCRIPT DEVELOPERS NOTE:
+ * - TypeScript is like JavaScript with type checking
+ * - The types (like ': string') help catch errors before running
+ * - async/await handles operations that take time (like loading pages)
+ * - Interfaces define the shape of data objects
+ * ===================================================================
+ */
+
+// Import required libraries for browser automation and accessibility testing
 import { chromium, Page, Browser } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 
-// Load environment variables
+// Load environment variables from .env file (contains BrowserStack credentials)
 dotenv.config();
 
+// ===================================================================
+// COMMAND LINE ARGUMENT PROCESSING
+// ===================================================================
 // Parse command line arguments for url, username, and password
 const argv = process.argv.slice(2);
 function getArg(flag: string, fallback: string) {
@@ -14,11 +60,13 @@ function getArg(flag: string, fallback: string) {
   return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : fallback;
 }
 
+// Configuration options from command line
 const USE_BROWSERSTACK = getArg('--browserstack', 'false') === 'true';
 const BROWSER_TYPE = getArg('--browser', 'chrome');
 const OS_TYPE = getArg('--os', 'Windows');
 const OS_VERSION = getArg('--os-version', '11');
 
+// Login configuration object - contains all the info needed to log into a website
 const loginConfig = {
   loginUrl: getArg('--url', 'https://example.com/login'),
   usernameSelector: 'input[name="username"]',
@@ -29,7 +77,10 @@ const loginConfig = {
   postLoginUrl: getArg('--post-login-url', 'https://example.com/dashboard'),
 };
 
-// BrowserStack configuration
+// ===================================================================
+// BROWSERSTACK CONFIGURATION
+// ===================================================================
+// BrowserStack configuration - tells BrowserStack what browser/OS to use
 const getBrowserStackCapabilities = () => ({
   'bstack:options': {
     'os': OS_TYPE,
@@ -48,6 +99,10 @@ const getBrowserStackCapabilities = () => ({
   }
 });
 
+/**
+ * Connect to BrowserStack cloud browser
+ * @returns Promise<Browser> - Connected browser instance
+ */
 async function connectToBrowserStack(): Promise<Browser> {
   const capabilities = getBrowserStackCapabilities();
   const cdpEndpoint = `wss://cdp.browserstack.com/playwright?caps=${encodeURIComponent(JSON.stringify(capabilities))}`;
@@ -58,6 +113,10 @@ async function connectToBrowserStack(): Promise<Browser> {
   return chromium.connectOverCDP(cdpEndpoint);
 }
 
+/**
+ * Connect to a local browser instance
+ * @returns Promise<Browser> - Connected browser instance
+ */
 async function connectToLocalBrowser(): Promise<Browser> {
   console.log('💻 Starting local browser...');
   return chromium.launch({ 
@@ -66,6 +125,12 @@ async function connectToLocalBrowser(): Promise<Browser> {
   });
 }
 
+/**
+ * Perform login to the website
+ * @param page - Playwright page object
+ * @param config - Login configuration object
+ * @returns Promise<string> - URL after login
+ */
 async function login(page: Page, config: typeof loginConfig): Promise<string> {
   await page.goto(config.loginUrl);
   await page.fill(config.usernameSelector, config.username);
@@ -77,6 +142,12 @@ async function login(page: Page, config: typeof loginConfig): Promise<string> {
   return page.url();
 }
 
+/**
+ * Get internal links from the page
+ * @param page - Playwright page object
+ * @param baseUrl - Base URL of the website
+ * @returns Promise<string[]> - List of internal links
+ */
 async function getInternalLinks(page: Page, baseUrl: string): Promise<string[]> {
   const base = new URL(baseUrl);
   const links = await page.$$eval('a[href]', as =>
@@ -92,10 +163,22 @@ async function getInternalLinks(page: Page, baseUrl: string): Promise<string[]> 
   ));
 }
 
+/**
+ * Run accessibility analysis on the page using axe-core
+ * @param page - Playwright page object
+ * @returns Promise<any> - Accessibility test results
+ */
 async function runA11y(page: Page) {
   return new AxeBuilder({ page }).analyze();
 }
 
+/**
+ * Crawl the website and test each page for accessibility
+ * @param page - Playwright page object
+ * @param startUrl - URL to start crawling from
+ * @param visited - Set of visited URLs (for internal use)
+ * @returns Promise<any[]> - Results of the accessibility tests
+ */
 async function crawlAndTest(page: Page, startUrl: string, visited = new Set<string>()) {
   const queue: string[] = [startUrl];
   const results: any[] = [];
@@ -114,6 +197,11 @@ async function crawlAndTest(page: Page, startUrl: string, visited = new Set<stri
   return results;
 }
 
+/**
+ * Generate HTML report from the accessibility test results
+ * @param results - Accessibility test results
+ * @returns string - HTML report as a string
+ */
 function generateHtmlReport(results: any[]): string {
   let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Accessibility Report</title><style>body{font-family:sans-serif;}h2{margin-top:2em;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:8px;}th{background:#eee;}tr.issue{background:#ffeaea;}</style></head><body>`;
   html += `<h1>Accessibility Report</h1>`;
@@ -133,6 +221,9 @@ function generateHtmlReport(results: any[]): string {
   return html;
 }
 
+// ===================================================================
+// MAIN EXECUTION FLOW
+// ===================================================================
 async function main() {
   console.log('🚀 Starting A11y Test Mate...');
   console.log(`🎯 Login URL: ${loginConfig.loginUrl}`);
@@ -221,4 +312,5 @@ async function main() {
   }
 }
 
+// Start the program
 main();

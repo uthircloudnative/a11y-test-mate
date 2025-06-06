@@ -1,29 +1,89 @@
+/**
+ * ===================================================================
+ * BROWSERSTACK-SELENIUM.TS - BASIC BROWSERSTACK ACCESSIBILITY TESTING
+ * ===================================================================
+ * 
+ * PURPOSE:
+ * This file provides the core functionality for running accessibility tests
+ * on BrowserStack's cloud platform using Selenium WebDriver. It's designed
+ * to work with FREE BrowserStack accounts and doesn't require advanced features.
+ * 
+ * WHAT THIS FILE DOES:
+ * 1. 🔗 Connects to BrowserStack's remote browsers in the cloud
+ * 2. 🌐 Tests websites on different browsers and operating systems
+ * 3. ♿ Scans for accessibility issues using the axe-core library
+ * 4. 📊 Generates comprehensive JSON reports with results
+ * 5. 🧹 Properly cleans up browser sessions when done
+ * 
+ * KEY BENEFITS:
+ * ✅ Works with FREE BrowserStack plans (no paid features required)
+ * ✅ No need to install browsers locally
+ * ✅ Tests on real devices and browsers, not simulators
+ * ✅ Supports parallel testing across different configurations
+ * ✅ Automatic session management and cleanup
+ * 
+ * BROWSER/OS COMBINATIONS SUPPORTED:
+ * - Chrome, Firefox, Safari, Edge
+ * - Windows 10/11, macOS, iOS, Android
+ * - Multiple browser versions
+ * 
+ * EXAMPLE USAGE:
+ * ```typescript
+ * const tester = new BrowserStackA11yTester({
+ *   username: 'your-browserstack-username',
+ *   accessKey: 'your-browserstack-key',
+ *   browser: 'chrome',
+ *   os: 'WINDOWS'
+ * });
+ * 
+ * await tester.connect();
+ * const results = await tester.testMultipleUrls(['https://example.com']);
+ * tester.generateReport(results);
+ * ```
+ * 
+ * NON-TYPESCRIPT DEVELOPERS NOTE:
+ * - Interfaces define the structure of configuration objects
+ * - async/await handles time-consuming operations like network requests
+ * - Classes group related functionality together
+ * - Error handling uses try/catch blocks for robust operation
+ * ===================================================================
+ */
+
+// Import required libraries for browser automation and accessibility testing
 import { Builder, WebDriver, By, until } from 'selenium-webdriver';
 import { AxeBuilder } from '@axe-core/webdriverjs';
 import * as fs from 'fs';
 import * as path from 'path';
 
+/**
+ * Configuration interface for BrowserStack connection
+ * This defines what settings are needed to connect to BrowserStack
+ */
 interface BrowserStackConfig {
-  username: string;
-  accessKey: string;
-  browser?: string;
-  browserVersion?: string;
-  os?: string;
-  osVersion?: string;
-  projectName?: string;
-  buildName?: string;
-  sessionName?: string;
+  username: string;           // Your BrowserStack username
+  accessKey: string;          // Your BrowserStack access key
+  browser?: string;           // Browser name (chrome, firefox, safari, edge)
+  browserVersion?: string;    // Browser version (latest, specific version)
+  os?: string;               // Operating system (WINDOWS, MAC)
+  osVersion?: string;        // OS version (10, 11, Big Sur, etc.)
+  projectName?: string;      // Project name for organizing tests
+  buildName?: string;        // Build name for grouping test runs
+  sessionName?: string;      // Individual session name
 }
 
+/**
+ * Test result interface - defines the structure of test results
+ * This is what gets returned after testing each URL
+ */
 interface A11yTestResult {
-  url: string;
-  violations: any[];
-  passes: any[];
-  incomplete: any[];
-  timestamp: string;
-  browserInfo: string;
-  success: boolean;
-  error?: string;
+  url: string;              // The URL that was tested
+  violations: any[];        // Array of accessibility violations found
+  passes: any[];           // Array of accessibility rules that passed
+  incomplete: any[];       // Array of rules that couldn't be fully tested
+  timestamp: string;       // When the test was run
+  browserInfo: string;     // Browser and OS information
+  success: boolean;        // Whether the test completed successfully
+  error?: string;          // Error message if test failed
 }
 
 /**

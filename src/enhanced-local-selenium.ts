@@ -969,7 +969,7 @@ export class EnhancedLocalA11yTester {
   }
 
   /**
-   * Discover internal links on current page
+   * Discover internal links on current page with enhanced filtering and prioritization
    */
   async getInternalLinks(baseUrl: string): Promise<string[]> {
     if (!this.driver) {
@@ -981,11 +981,13 @@ export class EnhancedLocalA11yTester {
       
       // Get all links on the page
       const linkElements = await this.driver.findElements(By.css('a[href]'));
-      const links: string[] = [];
+      const discoveredLinks: { url: string; text: string; priority: number }[] = [];
 
       for (const linkElement of linkElements) {
         try {
           const href = await linkElement.getAttribute('href');
+          const linkText = await linkElement.getText();
+          
           if (href) {
             const url = new URL(href, baseUrl);
             
@@ -993,13 +995,14 @@ export class EnhancedLocalA11yTester {
             if (url.hostname === base.hostname) {
               const normalizedUrl = url.protocol + '//' + url.hostname + url.pathname;
               
-              // Avoid duplicates and exclude common non-page URLs
-              if (!links.includes(normalizedUrl) && 
-                  !normalizedUrl.includes('#') &&
-                  !normalizedUrl.includes('mailto:') &&
-                  !normalizedUrl.includes('tel:') &&
-                  !normalizedUrl.match(/\.(pdf|jpg|jpeg|png|gif|css|js|ico)$/i)) {
-                links.push(normalizedUrl);
+              // Enhanced filtering: exclude non-page URLs and common patterns
+              if (this.isValidCrawlableUrl(normalizedUrl, linkText)) {
+                const priority = this.calculateUrlPriority(normalizedUrl, linkText);
+                discoveredLinks.push({
+                  url: normalizedUrl,
+                  text: linkText,
+                  priority
+                });
               }
             }
           }
@@ -1008,11 +1011,225 @@ export class EnhancedLocalA11yTester {
         }
       }
 
-      return links.slice(0, 20); // Limit to 20 links to avoid infinite crawling
+      // Remove duplicates and sort by priority
+      const uniqueLinks = new Map<string, { text: string; priority: number }>();
+      for (const link of discoveredLinks) {
+        if (!uniqueLinks.has(link.url) || uniqueLinks.get(link.url)!.priority < link.priority) {
+          uniqueLinks.set(link.url, { text: link.text, priority: link.priority });
+        }
+      }
+
+      // Sort by priority (higher priority first) and return URLs
+      const sortedLinks = Array.from(uniqueLinks.entries())
+        .sort((a, b) => b[1].priority - a[1].priority)
+        .map(([url]) => url);
+
+      console.log(`🔍 Discovered ${sortedLinks.length} prioritized internal links`);
+      return sortedLinks;
+
     } catch (error) {
       console.error('Error discovering links:', error);
       return [];
     }
+  }
+
+  /**
+   * Enhanced URL validation for crawling
+   */
+  private isValidCrawlableUrl(url: string, linkText: string): boolean {
+    // Exclude fragment identifiers, non-HTTP protocols, and file extensions
+    if (url.includes('#') || 
+        url.includes('mailto:') || 
+        url.includes('tel:') ||
+        url.includes('javascript:') ||
+        url.match(/\.(pdf|jpg|jpeg|png|gif|css|js|ico|xml|json|txt|zip|doc|docx|xls|xlsx|ppt|pptx)$/i)) {
+      return false;
+    }
+
+    // Exclude admin, API, and utility pages
+    const excludePatterns = [
+      /\/admin/i,
+      /\/api\//i,
+      /\/wp-admin/i,
+      /\/wp-content/i,
+      /\/wp-includes/i,
+      /\/wp-json/i,
+      /\/feed\//i,
+      /\/rss/i,
+      /\/sitemap/i,
+      /\/robots\.txt/i,
+      /\/favicon\.ico/i,
+      /\/apple-touch-icon/i,
+      /\/manifest\.json/i,
+      /\/service-worker/i,
+      /\/sw\.js/i,
+      /\/logout/i,
+      /\/signout/i,
+      /\/sign-out/i,
+      /\/unsubscribe/i,
+      /\/delete/i,
+      /\/remove/i,
+      /\/download/i,
+      /\/print/i,
+      /\/share/i,
+      /\/embed/i
+    ];
+
+    for (const pattern of excludePatterns) {
+      if (pattern.test(url)) {
+        return false;
+      }
+    }
+
+    // Exclude very long URLs (likely dynamic/generated)
+    if (url.length > 200) {
+      return false;
+    }
+
+    // Exclude URLs with too many query parameters
+    const urlObj = new URL(url);
+    if (urlObj.searchParams.toString().length > 100) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Calculate priority score for URLs based on content importance
+   */
+  private calculateUrlPriority(url: string, linkText: string): number {
+    let priority = 1; // Base priority
+
+    // Higher priority for main content pages
+    const highPriorityPatterns = [
+      /\/about/i,
+      /\/services/i,
+      /\/products/i,
+      /\/solutions/i,
+      /\/features/i,
+      /\/pricing/i,
+      /\/contact/i,
+      /\/support/i,
+      /\/help/i,
+      /\/faq/i,
+      /\/documentation/i,
+      /\/docs/i,
+      /\/guide/i,
+      /\/tutorial/i,
+      /\/learn/i,
+      /\/blog/i,
+      /\/news/i,
+      /\/resources/i,
+      /\/case-studies/i,
+      /\/testimonials/i,
+      /\/customers/i,
+      /\/partners/i,
+      /\/team/i,
+      /\/careers/i,
+      /\/jobs/i
+    ];
+
+    for (const pattern of highPriorityPatterns) {
+      if (pattern.test(url)) {
+        priority += 3;
+        break;
+      }
+    }
+
+    // Medium priority for navigation and category pages
+    const mediumPriorityPatterns = [
+      /\/category/i,
+      /\/categories/i,
+      /\/section/i,
+      /\/departments/i,
+      /\/browse/i,
+      /\/search/i,
+      /\/filter/i,
+      /\/tag/i,
+      /\/tags/i
+    ];
+
+    for (const pattern of mediumPriorityPatterns) {
+      if (pattern.test(url)) {
+        priority += 2;
+        break;
+      }
+    }
+
+    // Priority based on link text content
+    const highValueLinkText = [
+      /about/i,
+      /service/i,
+      /product/i,
+      /solution/i,
+      /feature/i,
+      /pricing/i,
+      /contact/i,
+      /support/i,
+      /help/i,
+      /documentation/i,
+      /guide/i,
+      /tutorial/i,
+      /learn/i,
+      /getting started/i,
+      /how to/i,
+      /overview/i,
+      /introduction/i
+    ];
+
+    for (const pattern of highValueLinkText) {
+      if (pattern.test(linkText)) {
+        priority += 2;
+        break;
+      }
+    }
+
+    // Lower priority for user-generated content and dynamic pages
+    const lowerPriorityPatterns = [
+      /\/user/i,
+      /\/profile/i,
+      /\/account/i,
+      /\/settings/i,
+      /\/preferences/i,
+      /\/dashboard/i,
+      /\/edit/i,
+      /\/create/i,
+      /\/add/i,
+      /\/new/i,
+      /\/upload/i,
+      /\/comment/i,
+      /\/reply/i,
+      /\/vote/i,
+      /\/like/i,
+      /\/share/i,
+      /\/follow/i,
+      /\/subscribe/i
+    ];
+
+    for (const pattern of lowerPriorityPatterns) {
+      if (pattern.test(url)) {
+        priority -= 1;
+        break;
+      }
+    }
+
+    // Prefer shorter, cleaner URLs
+    const pathDepth = (url.match(/\//g) || []).length - 2; // Subtract protocol slashes
+    if (pathDepth <= 2) {
+      priority += 1;
+    } else if (pathDepth > 4) {
+      priority -= 1;
+    }
+
+    // Avoid URLs with too many parameters
+    const urlObj = new URL(url);
+    const paramCount = Array.from(urlObj.searchParams.keys()).length;
+    if (paramCount > 3) {
+      priority -= 2;
+    }
+
+    return Math.max(priority, 0); // Ensure non-negative priority
   }
 
   /**
@@ -1087,7 +1304,7 @@ export class EnhancedLocalA11yTester {
   }
 
   /**
-   * Crawl and test multiple pages with login
+   * Enhanced crawl and test multiple pages with intelligent navigation
    */
   async crawlAndTest(startUrl: string, maxPages: number = 10): Promise<A11yTestResult[]> {
     if (!this.driver) {
@@ -1096,10 +1313,13 @@ export class EnhancedLocalA11yTester {
 
     const results: A11yTestResult[] = [];
     const visited = new Set<string>();
-    const queue: string[] = [];
+    const queue: { url: string; depth: number; priority: number }[] = [];
+    const maxDepth = 3; // Limit crawling depth to avoid going too deep
+    const maxLinksPerPage = Math.min(50, maxPages * 3); // Dynamic link discovery limit
 
-    console.log(`🚀 Starting crawl and test from: ${startUrl}`);
+    console.log(`🚀 Starting enhanced crawl and test from: ${startUrl}`);
     console.log(`📋 Max pages to test: ${maxPages}`);
+    console.log(`📊 Max crawling depth: ${maxDepth}`);
 
     let crawlStartUrl = startUrl;
 
@@ -1124,43 +1344,83 @@ export class EnhancedLocalA11yTester {
 
     // Navigate to the starting URL for crawling
     await this.driver.get(crawlStartUrl);
-    await this.driver.sleep(2000); // Wait for page load
+    await this.waitForDynamicContent(); // Enhanced page load waiting
 
     // Test the starting page
+    console.log(`\n🌐 Testing starting page: ${crawlStartUrl}`);
     const firstResult = await this.testCurrentPage();
     results.push(firstResult);
     visited.add(firstResult.url);
 
-    // Discover links for crawling
-    const links = await this.getInternalLinks(crawlStartUrl);
-    queue.push(...links.filter(link => !visited.has(link)));
+    // Discover initial links for crawling with priority scoring
+    console.log(`🔍 Discovering links from starting page...`);
+    const initialLinks = await this.getInternalLinks(crawlStartUrl);
+    
+    // Add discovered links to queue with depth 1 and their calculated priorities
+    for (const link of initialLinks) {
+      if (!visited.has(link)) {
+        queue.push({ url: link, depth: 1, priority: this.calculateUrlPriority(link, '') });
+      }
+    }
 
-    // Crawl additional pages
+    // Sort initial queue by priority
+    queue.sort((a, b) => b.priority - a.priority);
+    console.log(`📝 Added ${queue.length} prioritized links to crawling queue`);
+
+    // Enhanced crawling with depth control and intelligent navigation
     while (queue.length > 0 && results.length < maxPages) {
-      const nextUrl = queue.shift()!;
+      // Get the highest priority URL from the queue
+      const current = queue.shift()!;
       
-      if (visited.has(nextUrl)) continue;
-      visited.add(nextUrl);
+      if (visited.has(current.url) || current.depth > maxDepth) {
+        continue;
+      }
+      
+      visited.add(current.url);
 
       try {
-        console.log(`\n🌐 Navigating to: ${nextUrl}`);
-        await this.driver.get(nextUrl);
-        await this.driver.sleep(2000); // Wait for page load
+        console.log(`\n🌐 [Depth ${current.depth}] Navigating to: ${current.url}`);
+        await this.driver.get(current.url);
+        await this.waitForDynamicContent();
 
         // Test the page
         const result = await this.testCurrentPage();
         results.push(result);
 
-        // Discover more links if we haven't reached the limit
-        if (results.length < maxPages) {
-          const newLinks = await this.getInternalLinks(crawlStartUrl);
-          queue.push(...newLinks.filter(link => !visited.has(link)));
+        console.log(`✅ Page tested successfully (${results.length}/${maxPages})`);
+
+        // Discover more links if we haven't reached the limit and depth allows
+        if (results.length < maxPages && current.depth < maxDepth) {
+          console.log(`🔍 Discovering new links from current page...`);
+          const newLinks = await this.getInternalLinks(current.url);
+          let addedCount = 0;
+
+          for (const link of newLinks) {
+            if (!visited.has(link) && !queue.some(q => q.url === link)) {
+              const priority = this.calculateUrlPriority(link, '');
+              queue.push({ 
+                url: link, 
+                depth: current.depth + 1, 
+                priority: priority + (maxDepth - current.depth) // Boost priority for shallower pages
+              });
+              addedCount++;
+              
+              // Limit the number of links we add per page to prevent queue explosion
+              if (addedCount >= Math.min(10, maxPages - results.length)) {
+                break;
+              }
+            }
+          }
+
+          // Re-sort queue by priority after adding new links
+          queue.sort((a, b) => b.priority - a.priority);
+          console.log(`📝 Added ${addedCount} new links to queue (Total queue: ${queue.length})`);
         }
 
       } catch (error) {
-        console.error(`❌ Failed to test ${nextUrl}:`, error);
+        console.error(`❌ Failed to test ${current.url}:`, error);
         results.push({
-          url: nextUrl,
+          url: current.url,
           violations: [],
           passes: [],
           incomplete: [],
@@ -1172,7 +1432,12 @@ export class EnhancedLocalA11yTester {
       }
     }
 
-    console.log(`\n📊 Crawling completed: ${results.length} pages tested`);
+    console.log(`\n📊 Enhanced crawling completed:`);
+    console.log(`   • Pages tested: ${results.length}`);
+    console.log(`   • Pages discovered but not tested: ${queue.length}`);
+    console.log(`   • Maximum depth reached: ${Math.max(...results.map((_, i) => 
+      queue.find(q => q.url === results[i]?.url)?.depth || 0))}`);
+    
     return results;
   }
 
@@ -1722,37 +1987,83 @@ export class EnhancedLocalA11yTester {
   private async waitForDynamicContent(): Promise<void> {
     if (!this.driver) return;
 
-    try {
-      // Wait for page to be in ready state
-      await this.driver.wait(async () => {
-        const readyState = await this.driver!.executeScript('return document.readyState');
-        return readyState === 'complete';
-      }, 10000);
+    const maxWaitTime = 15000; // Maximum 15 seconds
+    const checkInterval = 1000; // Check every second
+    const stabilityWindow = 2000; // Page must be stable for 2 seconds
+    let stabilityStart = 0;
+    let lastElementCount = 0;
+    
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < maxWaitTime) {
+      try {
+        // Count various page elements to detect changes
+        const elementCounts = await this.driver.executeScript(`
+          return {
+            forms: document.querySelectorAll('form').length,
+            inputs: document.querySelectorAll('input').length,
+            buttons: document.querySelectorAll('button, input[type="submit"]').length,
+            images: document.querySelectorAll('img').length,
+            links: document.querySelectorAll('a').length,
+            divs: document.querySelectorAll('div').length,
+            readyState: document.readyState,
+            loadingElements: document.querySelectorAll('[class*="loading"], [class*="spinner"], [id*="loading"], [class*="wait"]').length
+          };
+        `) as any;
 
-      // Wait for any pending network requests to complete
-      await this.driver.sleep(1000);
+        const totalElements = elementCounts.forms + elementCounts.inputs + elementCounts.buttons + 
+                             elementCounts.images + elementCounts.links + elementCounts.divs;
 
-      // Check if page has stabilized (no DOM changes for 500ms)
-      let stableCount = 0;
-      let lastBodyContent = '';
-      
-      for (let i = 0; i < 5; i++) {
-        const currentBodyContent = await this.driver.executeScript('return document.body.innerHTML.length') as string;
-        if (currentBodyContent === lastBodyContent) {
-          stableCount++;
-        } else {
-          stableCount = 0;
-          lastBodyContent = currentBodyContent;
+        // Check if page is still loading
+        if (elementCounts.readyState !== 'complete') {
+          console.log(`   📄 Page still loading (readyState: ${elementCounts.readyState})`);
+          await this.driver.sleep(checkInterval);
+          continue;
         }
-        
-        if (stableCount >= 2) break;
-        await this.driver.sleep(500);
-      }
 
-    } catch (error) {
-      // If we can't detect stability, just wait a bit longer
-      await this.driver.sleep(2000);
+        // Check for loading indicators
+        if (elementCounts.loadingElements > 0) {
+          console.log(`   ⏳ Found ${elementCounts.loadingElements} loading indicator(s), waiting...`);
+          await this.driver.sleep(checkInterval);
+          continue;
+        }
+
+        // Check for page stability (element count unchanged)
+        if (totalElements === lastElementCount) {
+          if (stabilityStart === 0) {
+            stabilityStart = Date.now();
+            console.log(`   🔄 Page appears stable (${totalElements} elements), checking...`);
+          } else if (Date.now() - stabilityStart >= stabilityWindow) {
+            console.log(`   ✅ Page stable for ${stabilityWindow}ms with ${totalElements} elements`);
+            
+            // Additional check for form elements specifically
+            if (elementCounts.forms > 0 && elementCounts.inputs > 0) {
+              console.log(`   🎯 Found ${elementCounts.forms} form(s) with ${elementCounts.inputs} input(s) - ready for interaction`);
+              return;
+            } else {
+              console.log(`   ⚠️  No forms/inputs detected yet, but page is stable - proceeding`);
+              return;
+            }
+          }
+        } else {
+          // Page still changing
+          if (lastElementCount > 0) {
+            console.log(`   🔄 Page changing (${lastElementCount} → ${totalElements} elements)`);
+          }
+          lastElementCount = totalElements;
+          stabilityStart = 0;
+        }
+
+        await this.driver.sleep(checkInterval);
+
+      } catch (error) {
+        console.log(`   ❌ Error checking page stability: ${error}`);
+        await this.driver.sleep(checkInterval);
+      }
     }
+
+    // Timeout reached - proceed anyway but log warning
+    console.log(`   ⚠️  Timeout reached (${maxWaitTime}ms), proceeding with current page state`);
   }
 
   /**

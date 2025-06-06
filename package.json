@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npx ts-node src/test-enhanced-crawling.ts --quick",
+    "test-enhanced-crawling": "npx ts-node src/test-enhanced-crawling.ts",
+    "test-enhanced-crawling-local": "npx ts-node src/test-enhanced-crawling.ts --local-only",
+    "test-enhanced-crawling-browserstack": "npx ts-node src/test-enhanced-crawling.ts --browserstack-only",
     "start-browserstack": "./start-browserstack-server.sh",
     "check-server": "./check-server.sh",
     "test-connection": "npx ts-node src/test-connection.ts",
