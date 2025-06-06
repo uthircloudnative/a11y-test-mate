@@ -1,0 +1,40 @@
+{
+  "name": "a11y-test-mate",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start-browserstack": "./start-browserstack-server.sh",
+    "check-server": "./check-server.sh",
+    "test-connection": "npx ts-node src/test-connection.ts",
+    "run-a11y": "npx ts-node src/main.ts",
+    "run-a11y-local": "npx ts-node src/main.ts --browserstack false",
+    "run-a11y-browserstack": "npx ts-node src/main.ts --browserstack true",
+    "simple-test": "npx ts-node src/simple-test.ts",
+    "test-browserstack": "npx ts-node src/browserstack-cli.ts",
+    "test-enhanced-browserstack": "npx ts-node src/enhanced-browserstack-cli.ts",
+    "test-enhanced-local": "npx ts-node src/enhanced-local-cli.ts",
+    "build": "npx tsc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "@types/selenium-webdriver": "^4.1.28",
+    "chromedriver": "^137.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.10.1",
+    "@axe-core/webdriverjs": "^4.10.2",
+    "@types/node-fetch": "^2.6.12",
+    "axe-core": "^4.10.3",
+    "dotenv": "^16.5.0",
+    "node-fetch": "^3.3.2",
+    "playwright": "^1.52.0",
+    "selenium-webdriver": "^4.33.0"
+  }
+}

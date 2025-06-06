@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Accessibility Sample",
+      "type": "shell",
+      "command": "npx ts-node src/a11y-sample.ts",
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}
